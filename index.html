@@ -53,7 +53,7 @@
   #ytUrl{flex:1; min-width:0; font:inherit; border:1px solid var(--line); border-radius:8px; padding:8px 12px;}
   #ytUrl:focus{outline:none; border-color:var(--accent);}
   #playerWrap{margin-top:14px; position:relative; width:100%; aspect-ratio:16/9; background:#0E1116; border-radius:10px; overflow:hidden;}
-  #playerWrap iframe, #player{position:absolute; inset:0; width:100%; height:100%; border:0;}
+  #playerWrap iframe, #playerWrap [data-yt], #player{position:absolute; inset:0; width:100%; height:100%; border:0;}
   #playerEmpty{position:absolute; inset:0; display:flex; align-items:center; justify-content:center; color:#8C96A5; text-align:center; padding:20px; line-height:1.7;}
   #nowRow{display:flex; align-items:center; gap:8px; margin-top:12px; flex-wrap:wrap;}
   #nowTitle{flex:1; min-width:200px; font-weight:600; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;}
@@ -307,26 +307,51 @@ function loadYTApi(){
     setTimeout(()=> res(!!(window.YT && window.YT.Player)), 20000);
   });
 }
+let loadSeq = 0, loadedKey = '', playerSeq = 0, pollTimer = 0;
 async function loadVideo(){
   const {v, list} = parseYT($('ytUrl').value);
   if(!v && !list){ setStatus('badUrl','warn'); return; }
   if(CAP) return;
-  if(!await loadYTApi()){ setStatus('ytApiFail','warn'); return; }
+  const key = (v||'') + '|' + (list||'');
+  if(key===loadedKey && player) return;          /* 붙여 넣기 + [불러오기]로 같은 영상을 두 번 불러오지 않음 */
+  loadedKey = key;
+  const my = ++loadSeq;
+  if(!await loadYTApi()){ setStatus('ytApiFail','warn'); loadedKey=''; return; }
+  if(my !== loadSeq) return;                      /* 그 사이 더 새로운 요청이 있으면 이 요청은 버림 */
   if(player){ try{ player.destroy(); }catch(e){} player = null; }
+  clearInterval(pollTimer);
   ytReady = false; ytState = -1;
   $('playerEmpty').style.display = 'none';
-  if(!$('player')){ const d=document.createElement('div'); d.id='player'; $('playerWrap').appendChild(d); }
-  const vars = { rel:0, playsinline:1 };
+  /* 플레이어마다 새 자리(새 id)를 만들어 이전 플레이어와 절대 겹치지 않게 함 */
+  $('playerWrap').querySelectorAll('iframe, [data-yt]').forEach(n=>n.remove());
+  const old = $('player'); if(old) old.remove();
+  const holder = document.createElement('div'); holder.id = 'yt' + (++playerSeq); holder.dataset.yt = '1';
+  $('playerWrap').appendChild(holder);
+  const vars = { rel:0, playsinline:1, enablejsapi:1 };
   if(list){ vars.list = list; vars.listType = 'playlist'; }
   if(location.protocol.startsWith('http')) vars.origin = location.origin;
-  player = new YT.Player('player', {
+  const p = new YT.Player(holder.id, {
     width:'100%', height:'100%', videoId: v || undefined, playerVars: vars,
-    events: { onReady: onYTReady, onStateChange: onYTState, onError: onYTError },
+    events: { onReady: ()=>{ if(player===p) onYTReady(); }, onStateChange: e=>{ if(player===p) onYTState(e); }, onError: e=>{ if(player===p) onYTError(e); } },
   });
+  player = p;
   $('optScope').value = list ? 'all' : 'one';
   syncUI();
+  /* 예비 확인: '준비 완료' 신호가 오지 않아도 플레이어 상태를 직접 읽어서 동작 */
+  pollTimer = setInterval(()=>{
+    if(player!==p){ clearInterval(pollTimer); return; }
+    let st;
+    try{ if(typeof p.getPlayerState!=='function') return; st = p.getPlayerState(); }catch(e){ return; }
+    if(typeof st!=='number') return;
+    if(!ytReady) onYTReady();
+    if(st!==ytState && st!==5) onYTState({data:st, polled:true});
+    else if(st===1 && CAP && CAP.mode==='yt'){
+      const id = vidInfo().id;
+      if(SEG && id && SEG.vid && id!==SEG.vid) onYTState({data:1, polled:true});
+    }
+  }, 200);
 }
-function onYTReady(){ ytReady = true; updateNow(); if(!CAP) setStatus('stReady'); syncUI(); }
+function onYTReady(){ if(ytReady) return; ytReady = true; updateNow(); if(!CAP) setStatus('stReady'); syncUI(); }
 function onYTError(e){
   const c = e && e.data;
   if(c===101 || c===150) setStatus('ytErr150','warn');
@@ -347,6 +372,8 @@ function updateNow(){
 }
 /* 플레이어 상태로 곡의 시작·멈춤·끝을 정확히 앎 (0 끝, 1 재생, 2 일시정지, 3 불러오는 중) */
 function onYTState(e){
+  if(e.data===ytState && !e.force && e.data!==1) return;
+  if(!ytReady && typeof e.data==='number') onYTReady();
   ytState = e.data;
   updateNow(); syncUI();
   if(!CAP || CAP.mode!=='yt') return;
@@ -591,7 +618,7 @@ async function startYT(){
   try{ player.unMute(); player.setVolume(100); }catch(e){}
   const wasPlaying = ytState===1;
   try{ if($('optRestart').checked) player.seekTo(0, true); player.playVideo(); }catch(e){}
-  if(wasPlaying) onYTState({data:1});     /* 이미 재생 중이었다면 바로 녹음 시작 */
+  if(wasPlaying) onYTState({data:1, force:true});     /* 이미 재생 중이었다면 바로 녹음 시작 */
   else setStatus('stWaitPlay');
 }
 async function startOther(){
