@@ -58,6 +58,11 @@
   .bar i{display:block; height:100%; width:0; background:linear-gradient(90deg,#3E8E5A 0%,#3E8E5A 70%,#D9A23A 85%,#C62F2F 100%); background-size:var(--w,100%) 100%; transition:width .06s linear;}
   #ctrlRow{display:flex; gap:8px; margin-top:14px; flex-wrap:wrap; align-items:center;}
   #ctrlRow .size{margin-left:auto; color:var(--muted); font-size:12.5px;}
+  #titleRow{display:flex; gap:8px; align-items:center; margin-top:16px;}
+  #titleRow input{flex:1; min-width:0; font:inherit; border:1px solid var(--line); border-radius:8px; padding:7px 10px;}
+  #titleRow input:focus{border-color:var(--accent); outline:none;}
+  #titleRow label{color:var(--muted); white-space:nowrap;}
+  #titleHint{font-size:12px; color:var(--muted); margin-top:5px; min-height:16px;}
   .opts{display:grid; grid-template-columns:1fr 1fr; gap:10px 24px; margin-top:20px; padding-top:18px; border-top:1px solid var(--line);}
   .opts label{display:flex; align-items:center; gap:8px; cursor:pointer;}
   .opts input[type=checkbox]{width:16px; height:16px; accent-color:var(--accent);}
@@ -110,6 +115,10 @@
       <button id="cancelBtn" class="danger" disabled data-i="btnCancel">취소 (버리기)</button>
       <span class="size" id="sizeInfo"></span>
     </div>
+    <div id="titleRow"><label data-i="tLabel">곡 제목</label>
+      <input id="songTitle" data-ph="tPh" placeholder="유튜브 주소를 붙여넣으면 제목이 자동으로 들어갑니다 (직접 써도 됩니다)">
+      <button id="pasteBtn" data-i="tPaste">📋 주소 붙여넣기</button></div>
+    <div id="titleHint" data-i="tHint">유튜브 탭에서 Ctrl+L → Ctrl+C로 주소를 복사한 뒤 여기서 붙여넣기. 녹음 전·후 아무 때나 됩니다.</div>
     <div class="opts">
       <div>
         <label><input type="checkbox" id="optAutoStop" checked> <span data-i="optAutoStop">곡이 끝나면 자동 정지</span></label>
@@ -162,6 +171,9 @@ const I18N = {
     stRec:'● 녹음 중', stPaused:'일시정지됨', stSilentIn:'무음 감지 — {s}초 후 자동 정지',
     stCanceled:'공유를 취소했습니다.', stNoAudio:'소리가 함께 공유되지 않았습니다. 다시 녹음을 누르고 "탭 오디오도 공유"(또는 "시스템 오디오도 공유")를 켜 주세요.',
     stErr:'녹음을 시작하지 못했습니다: ', stNoSupport:'이 브라우저는 소리 녹음을 지원하지 않습니다. PC의 크롬이나 엣지에서 열어 주세요.',
+    tLabel:'곡 제목', tPh:'유튜브 주소를 붙여넣으면 제목이 자동으로 들어갑니다 (직접 써도 됩니다)', tPaste:'📋 주소 붙여넣기',
+    tHint:'유튜브 탭에서 Ctrl+L → Ctrl+C로 주소를 복사한 뒤 여기서 붙여넣기. 녹음 전·후 아무 때나 됩니다.',
+    tFetching:'제목을 가져오는 중…', tGot:'제목을 넣었습니다 ✓', tApplied:'방금 녹음한 파일 이름을 바꿨습니다 ✓', tFail:'제목을 가져오지 못했습니다 (인터넷 연결 확인). 직접 써 주세요.', tNoClip:'복사한 주소가 없습니다. 유튜브 탭에서 Ctrl+L → Ctrl+C를 먼저 해 주세요.',
     stDone:'녹음을 마쳤습니다. 아래 목록에서 저장하세요.', stDoneN:'{n}곡으로 나눠 저장 목록에 넣었습니다.', stAutoStopped:'곡이 끝나 자동으로 정지했습니다.',
     stNothing:'녹음된 소리가 없습니다. 재생 중인 탭과 "탭 오디오도 공유"를 확인해 주세요.', stDiscarded:'녹음을 버렸습니다.',
     stMicFail:'마이크를 켜지 못해 PC 소리만 녹음합니다.',
@@ -192,6 +204,9 @@ const I18N = {
     stRec:'● Recording', stPaused:'Paused', stSilentIn:'Silence detected — stopping in {s}s',
     stCanceled:'Sharing was cancelled.', stNoAudio:'No audio was shared. Press Record again and turn on "Also share tab audio" (or "Share system audio").',
     stErr:'Could not start recording: ', stNoSupport:'This browser cannot record PC audio. Please open this page in Chrome or Edge on a PC.',
+    tLabel:'Song title', tPh:'Paste a YouTube link to fill in the title automatically (or type one)', tPaste:'📋 Paste link',
+    tHint:'In the YouTube tab press Ctrl+L → Ctrl+C to copy the link, then paste it here — before or after recording.',
+    tFetching:'Getting the title…', tGot:'Title added ✓', tApplied:'Renamed the recording you just made ✓', tFail:'Could not get the title (check your internet). Please type it.', tNoClip:'Nothing copied yet. In the YouTube tab press Ctrl+L → Ctrl+C first.',
     stDone:'Recording finished. Save it from the list below.', stDoneN:'Split into {n} tracks in the list below.', stAutoStopped:'The song ended, so recording stopped automatically.',
     stNothing:'No sound was recorded. Check the playing tab and "Also share tab audio".', stDiscarded:'Recording discarded.',
     stMicFail:'Could not open the microphone; recording PC audio only.',
@@ -219,6 +234,7 @@ function applyLang(){
   document.documentElement.lang = LANG;
   document.querySelectorAll('[data-i]').forEach(el=>{ const k=el.dataset.i; if(I18N[LANG][k]!=null && !el.dataset.lock) el.textContent=T(k); });
   document.querySelectorAll('[data-ih]').forEach(el=>{ el.innerHTML = T(el.dataset.ih); });
+  document.querySelectorAll('[data-ph]').forEach(el=>{ el.placeholder = T(el.dataset.ph); });
   const st = $('status');
   if(st.dataset.lock) setStatus(st.dataset.i, st.className, st.dataset.rep ? JSON.parse(st.dataset.rep) : null);
   $('langBtn').textContent = LANG==='ko' ? 'EN' : '한국어';
@@ -540,7 +556,9 @@ async function stopRec(auto){
   s.L = s.R = null;
   const segs = findSegments(L, R, s.sr, $('optTrim').checked || auto, !video && !$('optAutoStop').checked && $('optSplit').checked);
   if(!segs.length){ tabIdle(); setStatus('stNothing','warn'); return; }
-  const base = defaultName();
+  const typed = $('songTitle').value.trim();
+  const base = typed || defaultName();
+  if(typed){ $('songTitle').value = ''; titleHint(''); }
   segs.forEach(([a,b],i)=> addRecording(
     segs.length>1 ? `${base}_${String(i+1).padStart(2,'0')}` : base,
     s.sr, L.slice(a,b), R.slice(a,b), video));
@@ -835,10 +853,66 @@ async function saveBlob(blob, name){
 }
 const safeName = s => (String(s).trim() || defaultName()).replace(/[\\/:*?"<>|]+/g,'_');
 
+/* ═══════════ 곡 제목 자동 넣기 ═══════════
+   크롬은 공유한 탭의 제목을 알려주지 않으므로, 유튜브 주소를 받아 공개 oEmbed 로 제목을 가져옵니다 */
+const ytId = u=>{ const m = String(u).match(/(?:youtu\.be\/|[?&]v=|\/shorts\/|\/live\/|\/embed\/)([\w-]{11})/); return m ? m[1] : null; };
+async function fetchYtTitle(url){
+  const id = ytId(url); if(!id) return null;
+  const watch = 'https://www.youtube.com/watch?v=' + id;
+  for(const u of ['https://noembed.com/embed?url=' + encodeURIComponent(watch),
+                  'https://www.youtube.com/oembed?format=json&url=' + encodeURIComponent(watch)]){
+    try{ const r = await fetch(u); if(r.ok){ const j = await r.json(); if(j && j.title) return String(j.title).trim(); } }catch(e){}
+  }
+  return null;
+}
+function titleHint(k){ const h = $('titleHint'); h.dataset.i = k || 'tHint'; h.textContent = T(k || 'tHint'); }
+/* 제목이 정해졌을 때: 녹음 중이거나 아직이면 다음 저장 이름으로, 방금 끝난 녹음(이름 안 바꿈·저장 전)이 있으면 그 이름을 바꿈 */
+function useTitle(t){
+  if(!t) return;
+  if(!S){
+    const last = [...recs.values()].filter(r=> r.auto && !r.saved).pop();
+    if(last){
+      const group = [...recs.values()].filter(r=> r.auto && !r.saved && r.name.replace(/_\d\d$/,'') === last.name.replace(/_\d\d$/,''));
+      group.forEach(r=>{ const sfx = (r.name.match(/_(\d\d)$/)||[])[1]; r.name = group.length>1 && sfx ? `${t}_${sfx}` : t; r.auto = false; r.el.querySelector('input').value = r.name; });
+      $('songTitle').value = ''; titleHint('tApplied'); return;
+    }
+  }
+  $('songTitle').value = t; titleHint('tGot');
+}
+async function handleTitleInput(v){
+  v = String(v||'').trim();
+  if(!ytId(v)) return false;
+  titleHint('tFetching');
+  const t = await fetchYtTitle(v);
+  if(t) useTitle(t); else { $('songTitle').value = ''; titleHint('tFail'); }
+  return true;
+}
+$('songTitle').addEventListener('paste', e=>{
+  const v = (e.clipboardData || window.clipboardData).getData('text');
+  if(ytId(v)){ e.preventDefault(); handleTitleInput(v); }
+});
+$('songTitle').addEventListener('change', e=>{ const v = e.target.value.trim(); if(!ytId(v) && v && !S) useTitle(v); else handleTitleInput(v); });
+$('pasteBtn').onclick = async ()=>{
+  let v = '';
+  try{ v = await navigator.clipboard.readText(); }catch(e){}
+  if(!await handleTitleInput(v)){ titleHint('tNoClip'); $('songTitle').focus(); }
+};
+/* MP3 안에 제목 정보(ID3v2.3 TIT2) — 휴대폰·차·프로젝터에서 곡 이름이 보이게 */
+function withId3Title(blob, title){
+  title = String(title||'').trim(); if(!title) return blob;
+  const txt = new Uint8Array(3 + title.length*2 + 2); txt[0] = 1; txt[1] = 0xFF; txt[2] = 0xFE;   /* UTF-16 + BOM */
+  for(let i=0;i<title.length;i++){ const c = title.charCodeAt(i); txt[3+i*2] = c & 0xFF; txt[4+i*2] = c >> 8; }
+  const fr = new Uint8Array(10 + txt.length); fr.set([0x54,0x49,0x54,0x32]);
+  const n = txt.length; fr[4]=(n>>>24)&255; fr[5]=(n>>>16)&255; fr[6]=(n>>>8)&255; fr[7]=n&255; fr.set(txt, 10);
+  const hd = new Uint8Array(10); hd.set([0x49,0x44,0x33,3,0,0]);
+  const sz = fr.length; hd[6]=(sz>>>21)&127; hd[7]=(sz>>>14)&127; hd[8]=(sz>>>7)&127; hd[9]=sz&127;   /* synchsafe */
+  return new Blob([hd, fr, blob], { type: blob.type });
+}
+
 /* ═══════════ 녹음 목록 ═══════════ */
 const recs = new Map(); let recSeq = 0;
 function addRecording(name, sr, L, R, video){
-  const id = ++recSeq, rec = { id, name, sr, L, R, video, saved:false,
+  const id = ++recSeq, rec = { id, name, sr, L, R, video, saved:false, auto: name.startsWith(T('recName')+'_') || name.startsWith(I18N.ko.recName+'_') || name.startsWith(I18N.en.recName+'_'),
     url: URL.createObjectURL(video || makeWav(L,R,sr)) };
   recs.set(id, rec);
   const el = document.createElement('div'); el.className='item'; el.dataset.id=id;
@@ -848,7 +922,8 @@ function addRecording(name, sr, L, R, video){
     <div class="btns">${video ? '<button class="primary" data-a="vid"></button>' : ''}<button ${video?'':'class="primary"'} data-a="mp3"></button><button data-a="wav"></button>
       <button class="danger" data-a="del"></button><span class="prog"></span></div>`;
   el.querySelector('input').value = name;
-  el.querySelector('input').oninput = e=> rec.name = e.target.value;
+  el.querySelector('input').oninput = e=>{ rec.name = e.target.value; rec.auto = false; };
+  rec.el = el;
   el.querySelector('.btns').onclick = e=> itemAction(rec, el, e.target.dataset.a);
   refreshItemLabels(el);
   $('list').prepend(el);
@@ -879,6 +954,7 @@ async function itemAction(rec, el, a){
       if(!await loadLame()){ prog.textContent = T('libFail'); return; }
       blob = await makeMp3(rec, +$('optKbps').value, p=> prog.textContent = T('encoding').replace('{p}', Math.round(p*100)));
       ext='mp3';
+      blob = withId3Title(blob, rec.name);
     }
     prog.textContent = '';
     if(await saveBlob(blob, safeName(rec.name)+'.'+ext)){ rec.saved = true; el.classList.add('saved'); prog.textContent = T('saved'); }
