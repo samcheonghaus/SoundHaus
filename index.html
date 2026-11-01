@@ -1,0 +1,779 @@
+<!DOCTYPE html>
+<!--
+  ============================================================================
+  SoundHaus — 유튜브를 틀면서 곡마다 바로 녹음 (MP3 · WAV · MP4)
+  Play YouTube inside the page and record each track as it plays.
+
+  Copyright (C) 2026  Kim Jin Baek (samcheonghaus)
+  Source code: https://github.com/samcheonghaus/SoundHaus
+
+  This program is free software: you can redistribute it and/or modify it
+  under the terms of the GNU General Public License as published by the
+  Free Software Foundation, either version 3 of the License, or (at your
+  option) any later version. <https://www.gnu.org/licenses/gpl-3.0.html>
+
+  THIRD-PARTY
+   YouTube IFrame Player API  (Google, YouTube Terms of Service)
+   lamejs (LGPL-3.0)          MP3 encoder, loaded from cdnjs on first MP3 save
+  ============================================================================
+-->
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="referrer" content="strict-origin-when-cross-origin">
+<title>SoundHaus — 유튜브 곡별 녹음기</title>
+<link id="fav" rel="icon" href="">
+<style>
+  :root{
+    --bg:#EDEFF2; --panel:#FFFFFF; --ink:#22262B; --muted:#6B7482; --line:#D9DDE3;
+    --accent:#1F4E8C; --accent-soft:#E8EEF7; --rec:#C62F2F; --warn:#B4402F; --ok:#2E7D4F;
+  }
+  *{box-sizing:border-box; margin:0; padding:0;}
+  body{font-family:'Segoe UI','Malgun Gothic','Apple SD Gothic Neo',sans-serif; background:var(--bg); color:var(--ink); font-size:14px; min-height:100vh;}
+  header{background:var(--panel); border-bottom:1px solid var(--line);}
+  .hin{max-width:900px; margin:0 auto; padding:14px 20px; display:flex; align-items:center; gap:10px;}
+  .mark{width:30px; height:30px; border-radius:8px; background:var(--accent); color:#fff; font-weight:700; display:flex; align-items:center; justify-content:center;}
+  header b{font-size:16px;} header span{color:var(--muted); font-size:12.5px;}
+  #langBtn{margin-left:auto;}
+  main{max-width:900px; margin:0 auto; padding:20px 20px 60px; display:flex; flex-direction:column; gap:18px;}
+  .card{background:var(--panel); border:1px solid var(--line); border-radius:12px; padding:20px 22px;}
+  .card h3{font-size:14px; margin-bottom:12px; color:var(--accent);}
+  button, select{font-family:inherit; font-size:13.5px; color:var(--ink); background:#fff; border:1px solid var(--line); border-radius:8px; padding:7px 14px; cursor:pointer;}
+  button:hover:not(:disabled){border-color:var(--accent); color:var(--accent);}
+  button:disabled{opacity:.4; cursor:default;}
+  button.primary{background:var(--accent); color:#fff; border-color:var(--accent);}
+  button.primary:hover:not(:disabled){background:#173D70; color:#fff;}
+  button.danger:hover:not(:disabled){border-color:var(--warn); color:var(--warn);}
+  #fileWarn{display:none; background:#FFF4E5; border:1px solid #F0C98B; color:#7A4B00; border-radius:10px; padding:12px 16px; line-height:1.6;}
+  #fileWarn a{color:var(--accent); font-weight:600;}
+
+  /* 유튜브 */
+  #urlRow{display:flex; gap:8px;}
+  #ytUrl{flex:1; min-width:0; font:inherit; border:1px solid var(--line); border-radius:8px; padding:8px 12px;}
+  #ytUrl:focus{outline:none; border-color:var(--accent);}
+  #playerWrap{margin-top:14px; position:relative; width:100%; aspect-ratio:16/9; background:#0E1116; border-radius:10px; overflow:hidden;}
+  #playerWrap iframe, #player{position:absolute; inset:0; width:100%; height:100%; border:0;}
+  #playerEmpty{position:absolute; inset:0; display:flex; align-items:center; justify-content:center; color:#8C96A5; text-align:center; padding:20px; line-height:1.7;}
+  #nowRow{display:flex; align-items:center; gap:8px; margin-top:12px; flex-wrap:wrap;}
+  #nowTitle{flex:1; min-width:200px; font-weight:600; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;}
+  #nowIdx{color:var(--muted); font-size:12.5px; white-space:nowrap;}
+  .tbtn{min-width:42px; font-size:15px; padding:6px 10px;}
+
+  /* 녹음 */
+  #recRow{display:flex; align-items:center; gap:22px; flex-wrap:wrap;}
+  #recBtn{width:88px; height:88px; border-radius:50%; border:4px solid #F1D2D2; background:var(--rec); color:#fff;
+    font-size:14px; font-weight:700; flex-shrink:0; box-shadow:0 3px 12px rgba(198,47,47,.25); padding:0; line-height:1.3; white-space:pre-line;}
+  #recBtn:hover:not(:disabled){background:#A82424; color:#fff; border-color:#F1D2D2;}
+  #recBtn.on{animation:pulse 1.4s ease-in-out infinite; opacity:1;}
+  @keyframes pulse{0%,100%{box-shadow:0 0 0 0 rgba(198,47,47,.45);}50%{box-shadow:0 0 0 14px rgba(198,47,47,0);}}
+  #recInfo{flex:1; min-width:260px;}
+  #timer{font-size:36px; font-weight:600; font-variant-numeric:tabular-nums; letter-spacing:.5px; line-height:1.1;}
+  #timer small{font-size:14px; color:var(--muted); font-weight:500; margin-left:10px;}
+  #status{margin-top:4px; color:var(--muted); min-height:20px; line-height:1.5;}
+  #status.rec{color:var(--rec); font-weight:600;} #status.warn{color:var(--warn);} #status.ok{color:var(--ok);}
+  .meter{display:flex; align-items:center; gap:8px; margin-top:8px;}
+  .meter label{width:14px; font-size:11px; color:var(--muted);}
+  .bar{flex:1; height:8px; border-radius:5px; background:#E6E9EE; overflow:hidden;}
+  .bar i{display:block; height:100%; width:0; background:#3E8E5A; transition:width .08s linear;}
+  #ctrlRow{display:flex; gap:8px; margin-top:14px; flex-wrap:wrap; align-items:center;}
+  #ctrlRow .size{margin-left:auto; color:var(--muted); font-size:12.5px;}
+  .opts{display:grid; grid-template-columns:1fr 1fr; gap:10px 24px; margin-top:18px; padding-top:16px; border-top:1px solid var(--line);}
+  .opts label{display:flex; align-items:center; gap:8px; cursor:pointer;}
+  .opts input[type=checkbox]{width:16px; height:16px; accent-color:var(--accent);}
+  .opts select{padding:4px 8px;}
+  #otherRow{margin-top:16px; padding-top:14px; border-top:1px dashed var(--line); color:var(--muted); font-size:12.5px; display:flex; align-items:center; gap:10px; flex-wrap:wrap;}
+  @media (max-width:640px){ .opts{grid-template-columns:1fr;} }
+
+  .how ol{padding-left:20px; line-height:1.85;}
+  .how .tip{margin-top:10px; font-size:12.5px; color:var(--muted); line-height:1.65;}
+  .how b{color:var(--ink);}
+
+  #empty{color:var(--muted); padding:6px 0;}
+  #listHead{display:flex; align-items:center; gap:8px; margin-bottom:12px;}
+  #listHead h3{margin:0; flex:1;}
+  .item{border:1px solid var(--line); border-radius:10px; padding:12px 14px; margin-bottom:10px; display:flex; flex-direction:column; gap:8px;}
+  .item .top{display:flex; align-items:center; gap:10px;}
+  .item input{flex:1; font:inherit; font-weight:600; border:1px solid transparent; border-radius:6px; padding:4px 6px; min-width:0;}
+  .item input:hover{border-color:var(--line);} .item input:focus{border-color:var(--accent); outline:none;}
+  .item .dur{color:var(--muted); font-variant-numeric:tabular-nums; font-size:12.5px; white-space:nowrap;}
+  .item .tag{font-size:11px; color:#8A5A00; background:#FFF1D6; border-radius:4px; padding:1px 6px; white-space:nowrap;}
+  .item audio{width:100%; height:36px;}
+  .item video{width:100%; max-height:320px; background:#000; border-radius:8px;}
+  .item .btns{display:flex; gap:6px; flex-wrap:wrap; align-items:center;}
+  .item .prog{color:var(--accent); font-size:12.5px;}
+  .item.saved{border-color:#B9D7C4;}
+  footer{max-width:900px; margin:0 auto; padding:0 20px 30px; color:var(--muted); font-size:12px; line-height:1.6;}
+</style>
+</head>
+<body>
+<header><div class="hin">
+  <div class="mark">S</div>
+  <div><b>SoundHaus</b> <span data-i="sub">· 유튜브를 틀면서 곡마다 바로 녹음</span></div>
+  <button id="langBtn">EN</button>
+</div></header>
+
+<main>
+  <div id="fileWarn" data-ih="fileWarn"></div>
+
+  <section class="card">
+    <h3 data-i="ytTitle">① 유튜브 불러오기</h3>
+    <div id="urlRow">
+      <input id="ytUrl" type="text" spellcheck="false" data-ph="urlPh">
+      <button id="loadBtn" class="primary" data-i="btnLoad">불러오기</button>
+    </div>
+    <div id="playerWrap"><div id="playerEmpty" data-i="playerEmpty">유튜브 영상이나 재생목록 주소를 붙여 넣고 [불러오기]를 누르세요.</div><div id="player"></div></div>
+    <div id="nowRow">
+      <button class="tbtn" id="prevBtn" disabled>⏮</button>
+      <button class="tbtn" id="playBtn" disabled>▶</button>
+      <button class="tbtn" id="nextBtn" disabled>⏭</button>
+      <div id="nowTitle"></div>
+      <span id="nowIdx"></span>
+    </div>
+  </section>
+
+  <section class="card">
+    <h3 data-i="recTitle">② 녹음</h3>
+    <div id="recRow">
+      <button id="recBtn" disabled></button>
+      <div id="recInfo">
+        <div id="timer">00:00<small id="trackNo"></small></div>
+        <div id="status"></div>
+        <div class="meter"><label>L</label><div class="bar"><i id="mL"></i></div></div>
+        <div class="meter"><label>R</label><div class="bar"><i id="mR"></i></div></div>
+      </div>
+    </div>
+    <div id="ctrlRow">
+      <button id="stopBtn" class="primary" disabled data-i="btnStop">■ 녹음 끝내기</button>
+      <button id="cancelBtn" class="danger" disabled data-i="btnCancel">취소 (버리기)</button>
+      <span class="size" id="sizeInfo"></span>
+    </div>
+    <div class="opts">
+      <label><span data-i="optScope">녹음 범위</span>
+        <select id="optScope"><option value="one" data-i="scopeOne">이 곡만</option><option value="all" data-i="scopeAll">재생목록 끝까지 (곡마다 따로)</option></select>
+      </label>
+      <label><span data-i="optQuality">MP3 음질</span>
+        <select id="optKbps"><option value="128">128 kbps</option><option value="192" selected>192 kbps</option><option value="256">256 kbps</option><option value="320">320 kbps</option></select>
+      </label>
+      <label><input type="checkbox" id="optTrim" checked> <span data-i="optTrim">앞뒤 무음 자동 자르기</span></label>
+      <label><input type="checkbox" id="optVideo"> <span data-i="optVideo">🎬 영상도 함께 녹화 (MP4)</span></label>
+      <label><input type="checkbox" id="optRestart" checked> <span data-i="optRestart">녹음 시작 때 곡을 처음부터</span></label>
+      <label><input type="checkbox" id="optMic"> <span data-i="optMic">마이크도 함께 (노래·연주 따라하기)</span></label>
+    </div>
+    <div id="otherRow">
+      <span data-i="otherTxt">유튜브가 아닌 다른 탭·앱(멜론 등)의 소리는 →</span>
+      <button id="otherBtn" data-i="btnOther">다른 탭·프로그램 녹음</button>
+    </div>
+  </section>
+
+  <section class="card how">
+    <h3 data-i="howTitle">사용 방법</h3>
+    <ol><li data-ih="how1"></li><li data-ih="how2"></li><li data-ih="how3"></li><li data-ih="how4"></li></ol>
+    <p class="tip" data-ih="howTip"></p>
+  </section>
+
+  <section class="card list">
+    <div id="listHead"><h3 data-i="listTitle">녹음 목록</h3><button id="saveAllBtn" disabled data-i="btnSaveAll">모두 MP3로 저장</button></div>
+    <div id="empty" data-i="listEmpty">아직 녹음이 없습니다.</div>
+    <div id="list"></div>
+  </section>
+</main>
+<footer data-i="foot"></footer>
+
+<script>
+/* ═══════════ 언어 ═══════════ */
+const I18N = {
+  ko:{
+    appTitle:'SoundHaus — 유튜브 곡별 녹음기', sub:'· 유튜브를 틀면서 곡마다 바로 녹음',
+    fileWarn:'⚠ 지금 이 파일을 <b>내 PC에서 직접</b> 열었습니다(주소가 C:/…). 유튜브는 이렇게 연 페이지 안에서는 영상 재생을 막습니다. <b>인터넷 주소로 열어 주세요:</b> <a href="https://samcheonghaus.github.io/SoundHaus/" target="_blank" rel="noopener">samcheonghaus.github.io/SoundHaus</a> &nbsp;·&nbsp; 아래 [다른 탭·프로그램 녹음]은 여기서도 됩니다.',
+    ytTitle:'① 유튜브 불러오기', urlPh:'유튜브 주소 붙여 넣기 (영상 또는 재생목록)', btnLoad:'불러오기',
+    playerEmpty:'유튜브 영상이나 재생목록 주소를 붙여 넣고 [불러오기]를 누르세요.',
+    tPrev:'이전 곡', tPlay:'재생 / 일시정지', tNext:'다음 곡',
+    recTitle:'② 녹음', btnRec:'● 녹음\n시작', btnRecOn:'녹음 중', btnStop:'■ 녹음 끝내기', btnCancel:'취소 (버리기)',
+    optScope:'녹음 범위', scopeOne:'이 곡만', scopeAll:'재생목록 끝까지 (곡마다 따로)', optQuality:'MP3 음질',
+    optTrim:'앞뒤 무음 자동 자르기', optVideo:'🎬 영상도 함께 녹화 (MP4)', optRestart:'녹음 시작 때 곡을 처음부터', optMic:'마이크도 함께 (노래·연주 따라하기)',
+    otherTxt:'유튜브가 아닌 다른 탭·앱(멜론 등)의 소리는 →', btnOther:'다른 탭·프로그램 녹음',
+    stIdle:'먼저 위에서 유튜브를 불러오세요.', stReady:'준비됐습니다 — [● 녹음 시작]을 누르세요.',
+    stAsk:'창이 뜨면 [공유] (또는 [허용])를 누르세요.', stWaitPlay:'재생을 기다리는 중…',
+    stRec:'● 녹음 중', stPausedYT:'일시정지 — 재생하면 이어서 녹음합니다', stBuffering:'불러오는 중… (녹음 잠시 멈춤)',
+    stCanceled:'공유를 취소했습니다.', stNoAudio:'소리가 공유되지 않았습니다. 다시 누르고 "탭 오디오도 공유"를 켜 주세요.',
+    stErr:'시작하지 못했습니다: ', stNoSupport:'이 브라우저는 녹음을 지원하지 않습니다. PC의 크롬이나 엣지에서 열어 주세요.',
+    stDone:'녹음을 마쳤습니다. 아래 목록에서 저장하세요.', stDoneN:'{n}곡을 녹음했습니다. 아래 목록에서 저장하세요.',
+    stDiscarded:'녹음을 버렸습니다.', stMicFail:'마이크를 켜지 못해 PC 소리만 녹음합니다.', stTrackSaved:'"{t}" 녹음 완료 — 다음 곡을 녹음합니다.',
+    stOtherPick:'공유 창에서 녹음할 탭을 클릭하고 [공유]를 누르세요.', stOtherWait:'준비 완료 — 그 탭에서 재생하세요. (소리가 나면 녹음 시작, 무음 2초면 정지)',
+    stSilentIn:'무음 감지 — {s}초 후 자동 정지',
+    badUrl:'유튜브 주소를 알아볼 수 없습니다. 예: https://www.youtube.com/watch?v=… 또는 재생목록 주소',
+    ytErr150:'이 영상은 올린 사람이 다른 사이트에서의 재생을 막아 두었습니다. [다른 탭·프로그램 녹음]으로 유튜브 탭을 녹음하세요.',
+    ytErr153:'유튜브가 이 페이지에서의 재생을 막았습니다. 인터넷 주소(GitHub Pages)로 열어 주세요.',
+    ytErrGen:'영상을 재생할 수 없습니다 (오류 {c}). 주소를 확인해 주세요.', ytApiFail:'유튜브 플레이어를 불러오지 못했습니다. 인터넷 연결을 확인해 주세요.',
+    trackOf:'{i} / {n}곡', trackNo:'· {n}번째 곡',
+    tabWait:'재생을 기다리는 중', tabRec:'녹음 중', tabPaused:'일시정지', tabDone:'녹음 완료 — 저장하세요',
+    howTitle:'사용 방법',
+    how1:'유튜브에서 원하는 영상(또는 재생목록) 주소를 복사해 <b>①에 붙여 넣으면</b> 바로 불러옵니다.',
+    how2:'<b>[● 녹음 시작]</b> → 뜨는 창에서 <b>[공유]</b>(또는 [허용]) 한 번. 곡이 처음부터 재생되며 녹음됩니다.',
+    how3:'곡이 끝나면 <b>그 순간 자동으로 정지</b>합니다. 녹음 범위를 "재생목록 끝까지"로 고르면 <b>곡마다 따로, 영상 제목으로</b> 녹음됩니다. 재생·일시정지·이전·다음은 ⏮ ▶ ⏭ 버튼이나 영상에서 바로 조작하세요 — 일시정지하면 녹음도 함께 멈췄다가 이어집니다.',
+    how4:'목록에서 <b>MP3로 저장</b>, 여러 곡이면 <b>모두 MP3로 저장</b>(폴더를 한 번 고르면 전부 저장).',
+    howTip:'소리는 스피커를 거치지 않고 디지털로 녹음되므로 PC 볼륨을 줄여도 괜찮습니다 (영상 플레이어 볼륨은 녹음에 반영되므로 SoundHaus가 최대로 맞춥니다). 영상 앞에 광고가 나오면 광고도 함께 녹음될 수 있습니다. 녹음 중에는 이 탭을 닫지 마세요 — 다른 탭으로 가도 녹음은 계속되고, 위쪽 탭에 ● 빨간 점과 시간이 표시됩니다.',
+    listTitle:'녹음 목록', listEmpty:'아직 녹음이 없습니다.', btnSaveAll:'모두 MP3로 저장',
+    saveMp3:'MP3로 저장', saveWav:'WAV (무손실)', saveVid:'영상 저장 ({f})', del:'삭제', encoding:'MP3 만드는 중… {p}%', saved:'저장했습니다 ✓', partial:'일부만',
+    cfDel:'이 녹음을 삭제할까요? 저장하지 않았다면 되돌릴 수 없습니다.', libFail:'MP3 모듈을 불러오지 못했습니다 (인터넷 연결 필요). WAV로는 저장할 수 있습니다.',
+    recName:'녹음', memo:'용량 약 {m}MB',
+    foot:'녹음한 음악은 개인 감상용으로만 사용하세요. 저작권이 있는 음악을 다시 올리거나 배포하면 저작권법 위반이 될 수 있습니다. 녹음 파일은 이 컴퓨터 안에만 있으며 어디에도 업로드되지 않습니다. · SoundHaus · GPLv3 · © 2026 Kim Jin Baek',
+  },
+  en:{
+    appTitle:'SoundHaus — record YouTube track by track', sub:'· play YouTube and record each track',
+    fileWarn:'⚠ This file was opened <b>directly from your PC</b> (address C:/…). YouTube blocks playback inside pages opened this way. <b>Please open the web address:</b> <a href="https://samcheonghaus.github.io/SoundHaus/" target="_blank" rel="noopener">samcheonghaus.github.io/SoundHaus</a> &nbsp;·&nbsp; [Record another tab / app] below still works here.',
+    ytTitle:'① Load YouTube', urlPh:'Paste a YouTube link (video or playlist)', btnLoad:'Load',
+    playerEmpty:'Paste a YouTube video or playlist link and press Load.',
+    tPrev:'Previous', tPlay:'Play / pause', tNext:'Next',
+    recTitle:'② Record', btnRec:'● Start\nrecording', btnRecOn:'Recording', btnStop:'■ Finish recording', btnCancel:'Cancel (discard)',
+    optScope:'Record', scopeOne:'This track only', scopeAll:'Whole playlist (one file per track)', optQuality:'MP3 quality',
+    optTrim:'Trim silence at start and end', optVideo:'🎬 Also record the video (MP4)', optRestart:'Start the track from the beginning', optMic:'Also record the microphone (sing / play along)',
+    otherTxt:'For other tabs or apps (not YouTube) →', btnOther:'Record another tab / app',
+    stIdle:'Load a YouTube link above first.', stReady:'Ready — press [● Start recording].',
+    stAsk:'When the dialog appears, press Share (or Allow).', stWaitPlay:'Waiting for playback…',
+    stRec:'● Recording', stPausedYT:'Paused — recording resumes when you play', stBuffering:'Loading… (recording paused)',
+    stCanceled:'Sharing was cancelled.', stNoAudio:'No audio was shared. Try again and turn on "Also share tab audio".',
+    stErr:'Could not start: ', stNoSupport:'This browser cannot record. Please use Chrome or Edge on a PC.',
+    stDone:'Recording finished. Save it from the list below.', stDoneN:'Recorded {n} tracks. Save them from the list below.',
+    stDiscarded:'Recording discarded.', stMicFail:'Could not open the microphone; recording PC audio only.', stTrackSaved:'"{t}" done — recording the next track.',
+    stOtherPick:'In the share dialog, click the tab to record, then Share.', stOtherWait:'Ready — play it in that tab. (Starts with the sound, stops after 2 s of silence)',
+    stSilentIn:'Silence detected — stopping in {s}s',
+    badUrl:'That does not look like a YouTube link. e.g. https://www.youtube.com/watch?v=… or a playlist link',
+    ytErr150:'The owner has disabled playback on other sites. Use [Record another tab / app] on the YouTube tab instead.',
+    ytErr153:'YouTube blocked playback on this page. Please open the web address (GitHub Pages).',
+    ytErrGen:'This video cannot be played (error {c}). Please check the link.', ytApiFail:'Could not load the YouTube player. Check your internet connection.',
+    trackOf:'{i} / {n}', trackNo:'· track {n}',
+    tabWait:'Waiting for playback', tabRec:'Recording', tabPaused:'Paused', tabDone:'Done — save it',
+    howTitle:'How to use',
+    how1:'Copy a YouTube video (or playlist) link and <b>paste it into ①</b> — it loads right away.',
+    how2:'Press <b>[● Start recording]</b> → press <b>Share</b> (or Allow) once. The track plays from the start and is recorded.',
+    how3:'Recording stops <b>the moment the track ends</b>. With "Whole playlist", each track becomes <b>its own file named after the video</b>. Use ⏮ ▶ ⏭ or the player itself — pausing pauses the recording too.',
+    how4:'<b>Save as MP3</b> from the list, or <b>Save all as MP3</b> (pick a folder once).',
+    howTip:'Audio is captured digitally, not through the speakers, so you can turn your PC volume down (the player volume does affect the recording, so SoundHaus sets it to maximum). Ads before a video may be recorded too. Keep this tab open while recording — you can switch tabs; the tab shows a red ● and the time.',
+    listTitle:'Recordings', listEmpty:'No recordings yet.', btnSaveAll:'Save all as MP3',
+    saveMp3:'Save as MP3', saveWav:'WAV (lossless)', saveVid:'Save video ({f})', del:'Delete', encoding:'Making MP3… {p}%', saved:'Saved ✓', partial:'partial',
+    cfDel:'Delete this recording? If you have not saved it, it cannot be recovered.', libFail:'Could not load the MP3 module (internet required). You can still save as WAV.',
+    recName:'Recording', memo:'about {m} MB',
+    foot:'Use recordings for personal listening only. Re-uploading or sharing copyrighted music may infringe copyright. Recordings stay on this computer and are never uploaded. · SoundHaus · GPLv3 · © 2026 Kim Jin Baek',
+  }
+};
+let LANG = (navigator.language||'').toLowerCase().startsWith('ko') ? 'ko' : 'en';
+const T = k => I18N[LANG][k] ?? k;
+const $ = id => document.getElementById(id);
+function applyLang(){
+  document.documentElement.lang = LANG;
+  document.querySelectorAll('[data-i]').forEach(el=>{ const k=el.dataset.i; if(I18N[LANG][k]!=null) el.textContent=T(k); });
+  document.querySelectorAll('[data-ih]').forEach(el=>{ el.innerHTML = T(el.dataset.ih); });
+  document.querySelectorAll('[data-ph]').forEach(el=>{ el.placeholder = T(el.dataset.ph); });
+  $('prevBtn').title=T('tPrev'); $('playBtn').title=T('tPlay'); $('nextBtn').title=T('tNext');
+  $('langBtn').textContent = LANG==='ko' ? 'EN' : '한국어';
+  const st=$('status'); if(st.dataset.key) setStatus(st.dataset.key, st.className, st.dataset.rep ? JSON.parse(st.dataset.rep) : null);
+  document.querySelectorAll('.item').forEach(refreshItemLabels);
+  syncUI();
+}
+function setStatus(key, cls, rep){
+  let t = T(key); if(rep) for(const k in rep) t = t.replace('{'+k+'}', rep[k]);
+  const s=$('status'); s.dataset.key=key; s.dataset.rep = rep ? JSON.stringify(rep) : ''; s.textContent=t; s.className=cls||'';
+}
+const fmtTime = sec => { sec=Math.max(0,Math.floor(sec)); const h=Math.floor(sec/3600), m=Math.floor(sec/60)%60, s=sec%60;
+  return (h? h+':'+String(m).padStart(2,'0') : String(m).padStart(2,'0')) + ':' + String(s).padStart(2,'0'); };
+const sleep = ms => new Promise(r=>setTimeout(r,ms));
+
+/* ═══════════ 유튜브 플레이어 ═══════════ */
+let player = null, ytReady = false, ytApi = null, ytState = -1;
+function parseYT(u){
+  u = String(u||'').trim(); let v=null, list=null;
+  if(/^[\w-]{11}$/.test(u)) return {v:u, list:null};
+  try{
+    const x = new URL(/^\w+:\/\//.test(u) ? u : 'https://'+u);
+    if(!/(^|\.)youtube\.com$|(^|\.)youtu\.be$|(^|\.)youtube-nocookie\.com$/.test(x.hostname)) return {v:null, list:null};
+    if(/youtu\.be$/.test(x.hostname)) v = x.pathname.slice(1).split('/')[0];
+    else { v = x.searchParams.get('v'); const m = x.pathname.match(/\/(?:shorts|embed|live|v)\/([\w-]{11})/); if(!v && m) v = m[1]; }
+    list = x.searchParams.get('list');
+  }catch(e){}
+  if(v && !/^[\w-]{11}$/.test(v)) v = null;
+  return {v, list};
+}
+function loadYTApi(){
+  if(window.YT && window.YT.Player) return Promise.resolve(true);
+  if(ytApi) return ytApi;
+  return ytApi = new Promise(res=>{
+    const prev = window.onYouTubeIframeAPIReady;
+    window.onYouTubeIframeAPIReady = ()=>{ if(prev) try{prev();}catch(e){} res(true); };
+    const sc = document.createElement('script'); sc.src = 'https://www.youtube.com/iframe_api';
+    sc.onerror = ()=>{ ytApi = null; res(false); };
+    document.head.appendChild(sc);
+    setTimeout(()=> res(!!(window.YT && window.YT.Player)), 20000);
+  });
+}
+async function loadVideo(){
+  const {v, list} = parseYT($('ytUrl').value);
+  if(!v && !list){ setStatus('badUrl','warn'); return; }
+  if(CAP) return;
+  if(!await loadYTApi()){ setStatus('ytApiFail','warn'); return; }
+  if(player){ try{ player.destroy(); }catch(e){} player = null; }
+  ytReady = false; ytState = -1;
+  $('playerEmpty').style.display = 'none';
+  if(!$('player')){ const d=document.createElement('div'); d.id='player'; $('playerWrap').appendChild(d); }
+  const vars = { rel:0, playsinline:1 };
+  if(list){ vars.list = list; vars.listType = 'playlist'; }
+  if(location.protocol.startsWith('http')) vars.origin = location.origin;
+  player = new YT.Player('player', {
+    width:'100%', height:'100%', videoId: v || undefined, playerVars: vars,
+    events: { onReady: onYTReady, onStateChange: onYTState, onError: onYTError },
+  });
+  $('optScope').value = list ? 'all' : 'one';
+  syncUI();
+}
+function onYTReady(){ ytReady = true; updateNow(); if(!CAP) setStatus('stReady'); syncUI(); }
+function onYTError(e){
+  const c = e && e.data;
+  if(c===101 || c===150) setStatus('ytErr150','warn');
+  else if(c===153 || c===152) setStatus('ytErr153','warn');
+  else setStatus('ytErrGen','warn',{c});
+}
+function vidInfo(){
+  let d = {}; try{ d = player.getVideoData() || {}; }catch(e){}
+  let pl = null, idx = -1; try{ pl = player.getPlaylist(); idx = player.getPlaylistIndex(); }catch(e){}
+  return { id:d.video_id||'', title:d.title||'', author:d.author||'', pl, idx };
+}
+function updateNow(){
+  if(!player || !ytReady){ $('nowTitle').textContent=''; $('nowIdx').textContent=''; return; }
+  const i = vidInfo();
+  $('nowTitle').textContent = i.title;
+  $('nowTitle').title = i.author ? i.title+' — '+i.author : i.title;
+  $('nowIdx').textContent = (i.pl && i.pl.length>1) ? T('trackOf').replace('{i}', i.idx+1).replace('{n}', i.pl.length) : '';
+}
+/* 플레이어 상태로 곡의 시작·멈춤·끝을 정확히 앎 (0 끝, 1 재생, 2 일시정지, 3 불러오는 중) */
+function onYTState(e){
+  ytState = e.data;
+  updateNow(); syncUI();
+  if(!CAP || CAP.mode!=='yt') return;
+  const info = vidInfo();
+  if(e.data===1){
+    if(SEG && SEG.vid && info.id && SEG.vid !== info.id) closeSeg(false);   /* 다른 곡으로 넘김 → 앞 곡은 '일부만' */
+    if(!SEG){
+      if(CAP.done) return;
+      SEG = newSeg(info); CAP.count++;
+    }
+    SEG.paused = false; segRecorderResume(SEG);
+    setStatus('stRec','rec');
+  } else if(e.data===2 || e.data===3){
+    if(SEG){ SEG.paused = true; segRecorderPause(SEG); }
+    setStatus(e.data===2 ? 'stPausedYT' : 'stBuffering');
+  } else if(e.data===0){
+    if(SEG) closeSeg(true);
+    const last = !info.pl || info.idx >= info.pl.length-1;
+    if($('optScope').value==='one' || last){ CAP.done = true; finishAll(true); }
+    else setStatus('stTrackSaved','ok',{t:info.title});
+  }
+}
+
+/* ═══════════ 소리 받기 (공유한 탭 → AudioWorklet → PCM) ═══════════ */
+const WORKLET = `
+class RecProc extends AudioWorkletProcessor{
+  constructor(){ super(); this.n=0; this.L=new Float32Array(4096); this.R=new Float32Array(4096); }
+  process(inputs){
+    const inp = inputs[0];
+    if(inp && inp.length){
+      const l = inp[0], r = inp[1] || inp[0];
+      for(let i=0;i<l.length;i++){
+        this.L[this.n]=l[i]; this.R[this.n]=r[i]; this.n++;
+        if(this.n===4096){ this.port.postMessage([this.L, this.R], [this.L.buffer, this.R.buffer]);
+          this.L=new Float32Array(4096); this.R=new Float32Array(4096); this.n=0; }
+      }
+    }
+    return true;
+  }
+}
+registerProcessor('rec-proc', RecProc);`;
+/* 파일로 연 경우(file://) 크롬은 blob: 모듈을 막으므로 data: 주소를 먼저 씀 */
+async function loadWorklet(ctx){
+  if(!ctx.audioWorklet) return false;
+  const urls = [ 'data:application/javascript;charset=utf-8,' + encodeURIComponent(WORKLET),
+                 URL.createObjectURL(new Blob([WORKLET], {type:'application/javascript'})) ];
+  for(const u of urls){ try{ await ctx.audioWorklet.addModule(u); return true; }catch(e){} }
+  return false;
+}
+function makeCapture(ctx, useWorklet, onData){
+  if(useWorklet){
+    const node = new AudioWorkletNode(ctx, 'rec-proc', { numberOfInputs:1, numberOfOutputs:1, outputChannelCount:[2], channelCount:2, channelCountMode:'explicit' });
+    node.port.onmessage = e=> onData(e.data[0], e.data[1]);
+    node.detach = ()=>{ node.port.onmessage = null; };
+    return node;
+  }
+  const node = ctx.createScriptProcessor(4096, 2, 2);
+  node.onaudioprocess = e=>{ const b=e.inputBuffer; onData(b.getChannelData(0).slice(), (b.numberOfChannels>1?b.getChannelData(1):b.getChannelData(0)).slice()); };
+  node.detach = ()=>{ node.onaudioprocess = null; };
+  return node;
+}
+function toI16(f){
+  const o = new Int16Array(f.length);
+  for(let i=0;i<f.length;i++){ let v=f[i]; v = v<-1?-1:v>1?1:v; o[i] = v<0 ? v*32768 : v*32767; }
+  return o;
+}
+
+const SIL_THR = 0.003;      /* 약 -50 dB 보다 작으면 무음 */
+let CAP = null;             /* 공유(캡처) 세션 */
+let SEG = null;             /* 지금 녹음 중인 곡 */
+let tails = [];             /* 끝난 곡의 꼬리(조금 늦게 도착하는 소리) */
+let lastSr = 48000;
+
+async function startCapture(mode){
+  if(!navigator.mediaDevices || !navigator.mediaDevices.getDisplayMedia){ setStatus('stNoSupport','warn'); return false; }
+  setStatus(mode==='yt' ? 'stAsk' : 'stOtherPick');
+  /* 오디오 엔진은 버튼을 누른 순간에 만들어야 크롬이 멈춤 상태로 두지 않음 */
+  const ctx = new AudioContext({ latencyHint:'playback' });
+  const workletReady = loadWorklet(ctx);
+  const audio = { echoCancellation:false, noiseSuppression:false, autoGainControl:false, suppressLocalAudioPlayback:false };
+  const video = { displaySurface:'browser', frameRate:{ideal:30}, width:{ideal:1920}, height:{ideal:1080} };
+  let stream;
+  try{
+    stream = await navigator.mediaDevices.getDisplayMedia(mode==='yt'
+      /* 이 탭(SoundHaus) 자체를 공유 → "이 탭 공유" 한 번만 누르면 됨 */
+      ? { video, audio, preferCurrentTab:true, selfBrowserSurface:'include', systemAudio:'exclude', surfaceSwitching:'exclude' }
+      : { video, audio, preferCurrentTab:false, selfBrowserSurface:'exclude', systemAudio:'include' });
+  }catch(e){
+    ctx.close().catch(()=>{});
+    if(e && e.name==='NotAllowedError') setStatus('stCanceled','warn');
+    else { setStatus('stErr','warn'); $('status').textContent += (e && e.message || e); }
+    return false;
+  }
+  try{
+    const aTracks = stream.getAudioTracks();
+    if(!aTracks.length){ stream.getTracks().forEach(t=>t.stop()); ctx.close().catch(()=>{}); setStatus('stNoAudio','warn'); return false; }
+    if(ctx.state!=='running'){ try{ await ctx.resume(); }catch(e){} }
+    const wantVideo = $('optVideo').checked && typeof MediaRecorder!=='undefined';
+    const vTrack = stream.getVideoTracks()[0] || null;
+    if(!wantVideo) stream.getVideoTracks().forEach(t=>t.stop());
+    else if(mode==='yt' && vTrack && window.CropTarget && vTrack.cropTo){
+      try{ await vTrack.cropTo(await CropTarget.fromElement($('playerWrap'))); }catch(e){}   /* 플레이어 부분만 녹화 */
+    }
+    const mix = ctx.createGain();
+    ctx.createMediaStreamSource(new MediaStream(aTracks)).connect(mix);
+    let mic = null;
+    if($('optMic').checked){
+      try{
+        mic = await navigator.mediaDevices.getUserMedia({ audio:{ echoCancellation:false, noiseSuppression:false, autoGainControl:false } });
+        ctx.createMediaStreamSource(mic).connect(mix);
+      }catch(e){ mic = null; setTimeout(()=>setStatus('stMicFail','warn'), 0); }
+    }
+    const node = makeCapture(ctx, await workletReady, onChunk);
+    mix.connect(node);
+    const mute = ctx.createGain(); mute.gain.value = 0;  node.connect(mute).connect(ctx.destination);
+    const split = ctx.createChannelSplitter(2), aL = ctx.createAnalyser(), aR = ctx.createAnalyser();
+    aL.fftSize = aR.fftSize = 1024; mix.connect(split); split.connect(aL,0); split.connect(aR,1);
+    let vStream = null, vType = '';
+    if(wantVideo && vTrack){
+      const dest = ctx.createMediaStreamDestination(); mix.connect(dest);
+      vStream = new MediaStream([vTrack, ...dest.stream.getAudioTracks()]);
+      vType = ['video/mp4;codecs=avc1.640028,mp4a.40.2','video/mp4;codecs=avc1,mp4a.40.2','video/mp4',
+               'video/webm;codecs=vp9,opus','video/webm;codecs=vp8,opus','video/webm'].find(t=>MediaRecorder.isTypeSupported(t)) || '';
+    }
+    CAP = { mode, ctx, stream, mic, node, aL, aR, sr:ctx.sampleRate, vStream, vType, count:0, done:false };
+    aTracks[0].addEventListener('ended', ()=>{ if(CAP) finishAll(false); });     /* 크롬의 '공유 중지' */
+    document.querySelectorAll('.item audio, .item video').forEach(m=>m.pause()); /* 미리듣기 소리가 섞이지 않게 */
+    clearInterval(tickTimer); tickTimer = setInterval(tick, 150); tick();
+    syncUI();
+    return true;
+  }catch(e){
+    stream.getTracks().forEach(t=>t.stop()); ctx.close().catch(()=>{}); CAP = null; syncUI();
+    setStatus('stErr','warn'); $('status').textContent += (e && e.message || e);
+    return false;
+  }
+}
+function newSeg(info){
+  const s = { vid:info.id||'', title:info.title||'', idx:info.idx, yt:CAP.mode==='yt', sr:CAP.sr,
+              L:[], R:[], frames:0, paused:true, heard:0, silent:0, mr:null, vChunks:[], vBytes:0 };
+  if(CAP.vStream){
+    try{
+      s.mr = new MediaRecorder(CAP.vStream, { mimeType:CAP.vType||undefined, videoBitsPerSecond:8000000, audioBitsPerSecond:192000 });
+      s.mime = s.mr.mimeType || CAP.vType || 'video/webm';
+      s.mr.ondataavailable = e=>{ if(e.data && e.data.size){ s.vChunks.push(e.data); s.vBytes += e.data.size; } };
+      s.mr.start(1000); s.mr.pause();
+    }catch(e){ s.mr = null; }
+  }
+  return s;
+}
+function segRecorderPause(s){ try{ if(s.mr && s.mr.state==='recording') s.mr.pause(); }catch(e){} }
+function segRecorderResume(s){ try{ if(s.mr && s.mr.state==='paused') s.mr.resume(); }catch(e){} }
+
+function onChunk(l, r){
+  if(!CAP) return;
+  if(tails.length){ const a=toI16(l), b=toI16(r); for(const t of tails){ t.L.push(a); t.R.push(b); t.frames += l.length; } }
+  if(CAP.mode==='other') return onChunkOther(l, r);
+  if(!SEG || SEG.paused) return;
+  SEG.L.push(toI16(l)); SEG.R.push(toI16(r)); SEG.frames += l.length;
+}
+/* 다른 탭·프로그램 모드: 소리가 나면 시작, 무음 2초면 정지 */
+function onChunkOther(l, r){
+  let peak = 0;
+  for(let i=0;i<l.length;i++){ const a=Math.abs(l[i]), b=Math.abs(r[i]); if(a>peak) peak=a; if(b>peak) peak=b; }
+  const loud = peak > SIL_THR;
+  if(!SEG){
+    if(!loud || CAP.done) return;
+    SEG = newSeg({id:'', title:'', idx:-1}); SEG.paused = false; segRecorderResume(SEG); CAP.count++;
+    setStatus('stRec','rec');
+  }
+  SEG.L.push(toI16(l)); SEG.R.push(toI16(r)); SEG.frames += l.length;
+  if(loud){ SEG.heard += l.length; SEG.silent = 0; } else SEG.silent += l.length;
+  if(SEG.heard > CAP.sr && SEG.silent >= 2*CAP.sr){ CAP.done = true; setTimeout(()=>finishAll(true), 0); }
+}
+
+/* 곡 하나를 마감 → 0.5초 꼬리까지 받은 뒤 목록에 추가 */
+function closeSeg(complete){
+  const s = SEG; if(!s) return; SEG = null;
+  tails.push(s);
+  setTimeout(async ()=>{
+    tails = tails.filter(t=>t!==s);
+    let video = null;
+    if(s.mr){
+      if(s.mr.state!=='inactive') await new Promise(res=>{ s.mr.addEventListener('stop', res, {once:true}); try{ s.mr.stop(); }catch(e){ res(); } });
+      if(s.vChunks.length) video = new Blob(s.vChunks, {type:s.mime.split(';')[0]});
+    }
+    if(!s.frames) return;
+    const L = joinChunks(s.L, s.frames), R = joinChunks(s.R, s.frames);
+    const seg = findTrim(L, R, s.sr, $('optTrim').checked);
+    if(!seg) return;
+    let name = s.title || defaultName();
+    if(s.title && $('optScope').value==='all' && s.idx>=0) name = String(s.idx+1).padStart(2,'0') + ' ' + s.title;
+    addRecording(name, s.sr, L.slice(seg[0],seg[1]), R.slice(seg[0],seg[1]), video, s.yt && !complete);
+  }, 500);
+}
+function joinChunks(arr, n){ const o=new Int16Array(n); let p=0; for(const c of arr){ o.set(c,p); p+=c.length; } return o; }
+function findTrim(L, R, sr, trim){
+  const blk = Math.max(1, Math.round(sr*0.05)), nb = Math.ceil(L.length/blk), thr = SIL_THR*32768;
+  let first=-1, last=-1;
+  for(let b=0;b<nb;b++){
+    const e = Math.min(L.length,(b+1)*blk);
+    for(let i=b*blk;i<e;i++){ if(Math.abs(L[i])>thr || Math.abs(R[i])>thr){ if(first<0) first=b; last=b; break; } }
+  }
+  if(first<0) return null;                       /* 소리가 전혀 없으면 버림 */
+  if(!trim) return [0, L.length];
+  return [Math.max(0,first-2)*blk, Math.min(L.length,(last+5)*blk)];
+}
+
+/* 녹음 세션 끝 */
+async function finishAll(auto){
+  if(!CAP) return;
+  if(SEG) closeSeg(auto);
+  const c = CAP; CAP = null; lastSr = c.sr;
+  syncUI();
+  await sleep(650);                       /* 꼬리 소리까지 받은 뒤 닫음 */
+  try{ c.node.detach(); }catch(e){}
+  c.stream.getTracks().forEach(t=>t.stop());
+  if(c.mic) c.mic.getTracks().forEach(t=>t.stop());
+  c.ctx.close().catch(()=>{});
+  tails = [];
+  clearInterval(tickTimer); $('mL').style.width='0'; $('mR').style.width='0';
+  await sleep(150);
+  const n = recs.size ? c.count : 0;
+  if(!n){ tabIdle(); setStatus(player && ytReady ? 'stReady' : 'stIdle'); return; }
+  setTab('done', '✓ ' + T('tabDone'));
+  if(document.visibilityState==='visible') setTimeout(()=>{ if(!CAP) tabIdle(); }, 5000);
+  setStatus(n>1 ? 'stDoneN' : 'stDone', 'ok', {n});
+}
+function cancelAll(){
+  if(!CAP) return;
+  const c = CAP; CAP = null;
+  if(SEG){ try{ if(SEG.mr && SEG.mr.state!=='inactive') SEG.mr.stop(); }catch(e){} SEG = null; }
+  tails = [];
+  try{ c.node.detach(); }catch(e){}
+  c.stream.getTracks().forEach(t=>t.stop()); if(c.mic) c.mic.getTracks().forEach(t=>t.stop()); c.ctx.close().catch(()=>{});
+  try{ if(c.mode==='yt' && player) player.pauseVideo(); }catch(e){}
+  clearInterval(tickTimer); $('mL').style.width='0'; $('mR').style.width='0';
+  tabIdle(); setStatus('stDiscarded'); syncUI();
+}
+async function startYT(){
+  if(!player || !ytReady || CAP) return;
+  if(!await startCapture('yt')) return;
+  try{ player.unMute(); player.setVolume(100); }catch(e){}
+  const wasPlaying = ytState===1;
+  try{ if($('optRestart').checked) player.seekTo(0, true); player.playVideo(); }catch(e){}
+  if(wasPlaying) onYTState({data:1});     /* 이미 재생 중이었다면 바로 녹음 시작 */
+  else setStatus('stWaitPlay');
+}
+async function startOther(){
+  if(CAP) return;
+  try{ if(player) player.pauseVideo(); }catch(e){}
+  if(await startCapture('other')) setStatus('stOtherWait');
+}
+
+/* ═══════════ 화면 갱신 · 탭 표시 ═══════════ */
+const FAV = c => 'data:image/svg+xml,' + encodeURIComponent(`<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32">${c}</svg>`);
+const ICONS = {
+  idle: FAV('<rect width="32" height="32" rx="8" fill="#1F4E8C"/><text x="16" y="23" font-size="20" font-family="Segoe UI,Arial" font-weight="700" fill="#fff" text-anchor="middle">S</text>'),
+  wait: FAV('<circle cx="16" cy="16" r="12" fill="none" stroke="#D9A23A" stroke-width="5"/>'),
+  rec:  FAV('<circle cx="16" cy="16" r="14" fill="#C62F2F"/>'),
+  pause:FAV('<rect x="6" y="5" width="7" height="22" rx="2" fill="#C62F2F"/><rect x="19" y="5" width="7" height="22" rx="2" fill="#C62F2F"/>'),
+  done: FAV('<circle cx="16" cy="16" r="14" fill="#2E7D4F"/><path d="M9 16.5l5 5 9-10" stroke="#fff" stroke-width="3.5" fill="none" stroke-linecap="round"/>'),
+};
+let tickTimer = 0, tabState = '';
+function setTab(state, title){ document.title = title; if(state!==tabState){ tabState = state; $('fav').href = ICONS[state]; } }
+function tabIdle(){ setTab('idle', T('appTitle')); }
+function tick(){
+  if(!CAP) return;
+  const lvl = an=>{ const b=new Float32Array(an.fftSize); an.getFloatTimeDomainData(b); let p=0; for(const v of b){ const a=Math.abs(v); if(a>p) p=a; } return Math.max(0, Math.min(1, (20*Math.log10(p||1e-6)+60)/60)); };
+  $('mL').style.width = (lvl(CAP.aL)*100)+'%'; $('mR').style.width = (lvl(CAP.aR)*100)+'%';
+  const tm = fmtTime(SEG ? SEG.frames/CAP.sr : 0);
+  $('timer').firstChild.nodeValue = tm;
+  $('trackNo').textContent = (CAP.mode==='yt' && CAP.count>0 && $('optScope').value==='all') ? ' '+T('trackNo').replace('{n}', CAP.count) : '';
+  $('sizeInfo').textContent = SEG && SEG.frames ? T('memo').replace('{m}', Math.round((SEG.frames*4 + SEG.vBytes)/1048576)) : '';
+  if(!SEG) setTab('wait', '◌ ' + T('tabWait'));
+  else if(SEG.paused) setTab('pause', '❚❚ ' + tm + ' · ' + T('tabPaused'));
+  else setTab('rec', '● ' + tm + ' · ' + T('tabRec'));
+  if(CAP.mode==='other' && SEG && SEG.heard > CAP.sr && SEG.silent > CAP.sr){
+    const left = Math.ceil(2 - SEG.silent/CAP.sr); if(left>0) setStatus('stSilentIn','warn',{s:left});
+  }
+}
+function syncUI(){
+  const on = !!CAP, pr = !!(player && ytReady);
+  const rb = $('recBtn');
+  rb.disabled = on || !pr;
+  rb.classList.toggle('on', on);
+  rb.textContent = on ? T('btnRecOn') : T('btnRec');
+  $('stopBtn').disabled = !on; $('cancelBtn').disabled = !on;
+  $('otherBtn').disabled = on; $('loadBtn').disabled = on;
+  $('prevBtn').disabled = $('nextBtn').disabled = $('playBtn').disabled = !pr;
+  $('playBtn').textContent = ytState===1 ? '❚❚' : '▶';
+  $('optScope').disabled = $('optVideo').disabled = $('optMic').disabled = on;
+  if(!on){ $('timer').firstChild.nodeValue = '00:00'; $('trackNo').textContent=''; $('sizeInfo').textContent=''; }
+}
+
+/* ═══════════ 파일 만들기 · 저장 ═══════════ */
+function makeWav(L, R, sr){
+  const n=L.length, buf=new ArrayBuffer(44+n*4), v=new DataView(buf);
+  const w=(o,s)=>{ for(let i=0;i<s.length;i++) v.setUint8(o+i, s.charCodeAt(i)); };
+  w(0,'RIFF'); v.setUint32(4,36+n*4,true); w(8,'WAVE'); w(12,'fmt '); v.setUint32(16,16,true);
+  v.setUint16(20,1,true); v.setUint16(22,2,true); v.setUint32(24,sr,true); v.setUint32(28,sr*4,true);
+  v.setUint16(32,4,true); v.setUint16(34,16,true); w(36,'data'); v.setUint32(40,n*4,true);
+  const pcm=new Int16Array(buf,44,n*2);
+  for(let i=0;i<n;i++){ pcm[2*i]=L[i]; pcm[2*i+1]=R[i]; }
+  return new Blob([buf],{type:'audio/wav'});
+}
+let lameReq = null;
+function loadLame(){
+  if(window.lamejs) return Promise.resolve(true);
+  if(lameReq) return lameReq;
+  return lameReq = new Promise(res=>{
+    const sc=document.createElement('script'); sc.src='https://cdnjs.cloudflare.com/ajax/libs/lamejs/1.2.1/lame.min.js';
+    sc.onload=()=>res(!!window.lamejs); sc.onerror=()=>{ lameReq=null; res(false); };
+    document.head.appendChild(sc);
+  });
+}
+async function makeMp3(rec, kbps, onProg){
+  const enc = new lamejs.Mp3Encoder(2, rec.sr, kbps), block = 1152*32, out = [];
+  for(let i=0,k=0; i<rec.L.length; i+=block, k++){
+    const b = enc.encodeBuffer(rec.L.subarray(i,i+block), rec.R.subarray(i,i+block));
+    if(b.length) out.push(new Uint8Array(b.buffer, b.byteOffset, b.length).slice());
+    if(k%8===0){ onProg(i/rec.L.length); await sleep(0); }
+  }
+  const e = enc.flush(); if(e.length) out.push(new Uint8Array(e.buffer, e.byteOffset, e.length).slice());
+  return new Blob(out,{type:'audio/mpeg'});
+}
+let dirHandle = null;   /* '모두 저장' 때 고른 폴더 */
+async function saveBlob(blob, name, toDir){
+  if(toDir && dirHandle){
+    try{ const fh = await dirHandle.getFileHandle(name, {create:true}); const w = await fh.createWritable(); await w.write(blob); await w.close(); return true; }catch(e){}
+  }
+  const ext = name.split('.').pop();
+  if(window.showSaveFilePicker && !toDir){
+    try{
+      const h = await showSaveFilePicker({ suggestedName:name, types:[{ description:ext.toUpperCase(), accept:{ [blob.type]:['.'+ext] } }] });
+      const w = await h.createWritable(); await w.write(blob); await w.close(); return true;
+    }catch(e){ if(e.name==='AbortError') return false; }
+  }
+  const a=document.createElement('a'); a.href=URL.createObjectURL(blob); a.download=name; a.click();
+  setTimeout(()=>URL.revokeObjectURL(a.href), 10000);
+  return true;
+}
+const safeName = s => (String(s).trim() || defaultName()).replace(/[\\/:*?"<>|]+/g,'_').replace(/\s+/g,' ').slice(0,150);
+function defaultName(){
+  const d=new Date(), p=x=>String(x).padStart(2,'0');
+  return `${T('recName')}_${d.getFullYear()}-${p(d.getMonth()+1)}-${p(d.getDate())}_${p(d.getHours())}${p(d.getMinutes())}${p(d.getSeconds())}`;
+}
+
+/* ═══════════ 녹음 목록 ═══════════ */
+const recs = new Map(); let recSeq = 0;
+function addRecording(name, sr, L, R, video, partial){
+  const id = ++recSeq, rec = { id, name, sr, L, R, video, saved:false, url:URL.createObjectURL(video || makeWav(L,R,sr)) };
+  recs.set(id, rec);
+  const el = document.createElement('div'); el.className='item'; el.dataset.id=id;
+  el.innerHTML = `<div class="top"><input value=""><span class="tag" style="display:${partial?'':'none'}"></span><span class="dur">${fmtTime(L.length/sr)}</span></div>
+    ${video ? `<video controls preload="metadata" src="${rec.url}"></video>` : `<audio controls preload="metadata" src="${rec.url}"></audio>`}
+    <div class="btns">${video ? '<button class="primary" data-a="vid"></button>' : ''}<button ${video?'':'class="primary"'} data-a="mp3"></button><button data-a="wav"></button>
+      <button class="danger" data-a="del"></button><span class="prog"></span></div>`;
+  el.querySelector('input').value = name;
+  el.querySelector('input').oninput = e=> rec.name = e.target.value;
+  el.querySelector('.btns').onclick = e=> itemAction(rec, el, e.target.dataset.a);
+  refreshItemLabels(el);
+  $('list').append(el);
+  $('empty').style.display='none'; $('saveAllBtn').disabled = false;
+}
+function refreshItemLabels(el){
+  const rec = recs.get(+el.dataset.id);
+  const vb = el.querySelector('[data-a="vid"]');
+  if(vb && rec) vb.textContent = T('saveVid').replace('{f}', /mp4/.test(rec.video.type) ? 'MP4' : 'WebM');
+  el.querySelector('[data-a="mp3"]').textContent = T('saveMp3');
+  el.querySelector('[data-a="wav"]').textContent = T('saveWav');
+  el.querySelector('[data-a="del"]').textContent = T('del');
+  el.querySelector('.tag').textContent = T('partial');
+}
+async function itemAction(rec, el, a, toDir){
+  if(!a) return false;
+  const prog = el.querySelector('.prog');
+  if(a==='del'){
+    if(!rec.saved && !confirm(T('cfDel'))) return false;
+    URL.revokeObjectURL(rec.url); recs.delete(rec.id); el.remove();
+    if(!recs.size){ $('empty').style.display=''; $('saveAllBtn').disabled = true; }
+    return true;
+  }
+  const btns = el.querySelectorAll('button'); btns.forEach(b=>b.disabled=true);
+  try{
+    let blob, ext;
+    if(a==='vid'){ blob = rec.video; ext = /mp4/.test(rec.video.type) ? 'mp4' : 'webm'; }
+    else if(a==='wav'){ blob = makeWav(rec.L, rec.R, rec.sr); ext='wav'; }
+    else{
+      if(!await loadLame()){ prog.textContent = T('libFail'); return false; }
+      blob = await makeMp3(rec, +$('optKbps').value, p=> prog.textContent = T('encoding').replace('{p}', Math.round(p*100)));
+      ext='mp3';
+    }
+    prog.textContent = '';
+    if(await saveBlob(blob, safeName(rec.name)+'.'+ext, toDir)){ rec.saved = true; el.classList.add('saved'); prog.textContent = T('saved'); return true; }
+    return false;
+  } finally { btns.forEach(b=>b.disabled=false); }
+}
+$('saveAllBtn').onclick = async ()=>{
+  const items = [...document.querySelectorAll('.item')];
+  if(!items.length) return;
+  if(window.showDirectoryPicker){ try{ dirHandle = await showDirectoryPicker({ mode:'readwrite' }); }catch(e){ if(e.name==='AbortError') return; dirHandle = null; } }
+  $('saveAllBtn').disabled = true;
+  for(const el of items){ const rec = recs.get(+el.dataset.id); if(rec) await itemAction(rec, el, 'mp3', true); }
+  dirHandle = null; $('saveAllBtn').disabled = !recs.size;
+};
+
+/* ═══════════ 버튼 ═══════════ */
+$('loadBtn').onclick = loadVideo;
+$('ytUrl').addEventListener('keydown', e=>{ if(e.key==='Enter'){ e.preventDefault(); loadVideo(); } });
+$('ytUrl').addEventListener('paste', ()=> setTimeout(()=>{ const p=parseYT($('ytUrl').value); if((p.v||p.list) && !CAP) loadVideo(); }, 0));
+$('recBtn').onclick = startYT;
+$('stopBtn').onclick = ()=> finishAll(false);
+$('cancelBtn').onclick = cancelAll;
+$('otherBtn').onclick = startOther;
+$('playBtn').onclick = ()=>{ if(!player) return; try{ ytState===1 ? player.pauseVideo() : player.playVideo(); }catch(e){} };
+$('prevBtn').onclick = ()=>{ if(!player) return; try{ const i=vidInfo(); (i.pl && i.idx>0) ? player.previousVideo() : player.seekTo(0,true); }catch(e){} };
+$('nextBtn').onclick = ()=>{ if(!player) return; try{ player.nextVideo(); }catch(e){} };
+$('langBtn').onclick = ()=>{ LANG = LANG==='ko' ? 'en' : 'ko'; applyLang(); if(!CAP && tabState!=='done') tabIdle(); };
+window.addEventListener('beforeunload', e=>{ if(CAP || [...recs.values()].some(r=>!r.saved)){ e.preventDefault(); e.returnValue=''; } });
+
+if(location.protocol==='file:') $('fileWarn').style.display='block';
+applyLang(); tabIdle();
+if(!navigator.mediaDevices || !navigator.mediaDevices.getDisplayMedia) setStatus('stNoSupport','warn'); else setStatus('stIdle');
+/* 주소 뒤에 ?v=영상ID / ?list=재생목록ID / ?url=유튜브주소 를 붙여 열면 바로 불러옴 */
+(()=>{ const q=new URLSearchParams(location.search);
+  const u = q.get('url') || (q.get('v') ? 'https://www.youtube.com/watch?v='+q.get('v')+(q.get('list')?'&list='+q.get('list'):'') : '') || (q.get('list') ? 'https://www.youtube.com/playlist?list='+q.get('list') : '');
+  if(u){ $('ytUrl').value=u; loadVideo(); } })();
+</script>
+</body>
+</html>
